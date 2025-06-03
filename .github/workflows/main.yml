@@ -148,7 +148,7 @@ jobs:
           echo "Starting image build..."
           make image \
             PROFILE="generic" \
-            PACKAGES="dnsmasq-full chinadns-ng dns2socks microsocks tcping xray-core xray-plugin luci-app-passwall luci-i18n-passwall-zh-cn kmod-nft-nat kmod-nft-socket kmod-nft-tproxy htop keepalived luci luci-compat luci-i18n-base-zh-cn qemu-ga inotifywait luci-app-keepalived -dnsmasq" \
+            PACKAGES="dnsmasq-full chinadns-ng dns2socks microsocks tcping xray-core xray-plugin luci-app-passwall luci-i18n-passwall-zh-cn kmod-nft-nat kmod-nft-socket kmod-nft-tproxy htop keepalived luci luci-ssl luci-compat luci-i18n-base-zh-cn qemu-ga inotifywait luci-app-keepalived -dnsmasq" \
             KERNEL_PARTSIZE=32 \
             ROOTFS_PARTSIZE=256
 
