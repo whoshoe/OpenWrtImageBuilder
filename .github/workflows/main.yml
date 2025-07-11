@@ -174,7 +174,7 @@ jobs:
           # --- 2. Define Specified Packages ---
           SPECIFIED_PACKAGES=(
             "dnsmasq-full" "chinadns-ng" "dns2socks" "microsocks" "tcping"
-            "xray-core" "xray-plugin" "luci-app-passwall" "luci-i18n-passwall-zh-cn"
+            "xray-core" "xray-plugin" "geoview" "luci-app-passwall" "luci-i18n-passwall-zh-cn"
             "kmod-nft-nat" "kmod-nft-socket" "kmod-nft-tproxy" "htop" "keepalived"
             "luci" "luci-ssl" "luci-compat" "luci-i18n-base-zh-cn" "qemu-ga" "inotifywait"
             "luci-app-keepalived" "unzip"
