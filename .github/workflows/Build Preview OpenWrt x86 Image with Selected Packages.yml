@@ -1,4 +1,4 @@
-name: Build OpenWrt x86 Image with Selected Packages
+name: Build Preview OpenWrt x86 Image with Selected Packages
 
 on:
   workflow_dispatch: # Allows manual triggering from the Actions tab
