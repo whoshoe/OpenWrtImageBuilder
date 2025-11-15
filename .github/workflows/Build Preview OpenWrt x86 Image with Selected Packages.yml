@@ -295,7 +295,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           tag_name: ${{ steps.create_tag.outputs.RELEASE_TAG }}
-          name: OpenWrt Build openwrt-image-${{ steps.create_tag.outputs.RELEASE_TAG }}
+          name: Preview-${{ steps.create_tag.outputs.RELEASE_TAG }}
           body: ${{ steps.generate_release_notes.outputs.release_body }}
           draft: false
           prerelease: true
@@ -320,7 +320,7 @@ jobs:
               core.info(`Fetching releases for ${owner}/${repo}...`);
               const { data: allReleases } = await github.rest.repos.listReleases({ owner, repo, per_page: 100 });
               
-              const workflowReleases = allReleases.filter(r => r.name && r.name.startsWith("OpenWrt Build openwrt-image-"));
+              const workflowReleases = allReleases.filter(r => r.name && r.name.startsWith("Preview-"));
               core.info(`Found ${workflowReleases.length} releases matching workflow pattern out of ${allReleases.length} total releases.`);
 
               const sortedReleases = workflowReleases.sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
