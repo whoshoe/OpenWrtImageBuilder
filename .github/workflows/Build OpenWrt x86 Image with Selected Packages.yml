@@ -66,9 +66,9 @@ jobs:
           RELEASE_INFO_URL="https://api.github.com/repos/xiaorouji/openwrt-passwall/releases/latest"
           echo "Fetching latest Passwall release info from $RELEASE_INFO_URL"
           
-          LUCI_APP_URL=$(curl -s $RELEASE_INFO_URL | jq -r '.assets[] | select(.name | test(".*luci-app-passwall_.*\\.ipk$")) | .browser_download_url' | head -n1)
-          LUCI_I18N_URL=$(curl -s $RELEASE_INFO_URL | jq -r '.assets[] | select(.name | test(".*luci-i18n-passwall-zh-cn_.*\\.ipk$")) | .browser_download_url' | head -n1)
-          PACKAGES_ZIP_URL=$(curl -s $RELEASE_INFO_URL | jq -r '.assets[] | select(.name == "passwall_packages_ipk_x86_64.zip") | .browser_download_url' | head -n1)
+          LUCI_APP_URL=$(curl -s -H "Authorization: token $GITHUB_TOKEN" $RELEASE_INFO_URL | jq -r '.assets[] | select(.name | test(".*luci-app-passwall_.*\\.ipk$")) | .browser_download_url' | head -n1)
+          LUCI_I18N_URL=$(curl -s -H "Authorization: token $GITHUB_TOKEN" $RELEASE_INFO_URL | jq -r '.assets[] | select(.name | test(".*luci-i18n-passwall-zh-cn_.*\\.ipk$")) | .browser_download_url' | head -n1)
+          PACKAGES_ZIP_URL=$(curl -s -H "Authorization: token $GITHUB_TOKEN" $RELEASE_INFO_URL | jq -r '.assets[] | select(.name == "passwall_packages_ipk_x86_64.zip") | .browser_download_url' | head -n1)
 
           if [ -z "$LUCI_APP_URL" ] || [ "$LUCI_APP_URL" == "null" ]; then echo "::error::Could not find luci-app-passwall IPK URL."; exit 1; fi
           if [ -z "$LUCI_I18N_URL" ] || [ "$LUCI_I18N_URL" == "null" ]; then echo "::error::Could not find luci-i18n-passwall-zh-cn IPK URL."; exit 1; fi
