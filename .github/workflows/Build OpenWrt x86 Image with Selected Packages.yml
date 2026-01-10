@@ -11,7 +11,28 @@ jobs:
     steps:
       - name: Checkout Repository
         uses: actions/checkout@v4
-
+        
+      - name: Debug Release Info (Verify URL Output)
+        id: debug_release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          RELEASE_INFO_URL="https://api.github.com/repos/xiaorouji/openwrt-passwall/releases/latest"
+          echo "--- DEBUGGING URL: $RELEASE_INFO_URL ---"
+          
+          # 1. Fetch headers (-I) to check HTTP Status (200 vs 404 vs 403)
+          echo "--- HTTP HEADERS ---"
+          curl -I -s -H "Authorization: token $GITHUB_TOKEN" "$RELEASE_INFO_URL"
+          
+          # 2. Fetch the actual Body text to see the error message
+          echo "--- RAW RESPONSE BODY ---"
+          curl -s -H "Authorization: token $GITHUB_TOKEN" "$RELEASE_INFO_URL" > response.json
+          cat response.json
+          echo "" # Newline for readability
+          
+          # 3. Stop here so you can read the logs without failing on the next steps
+          echo "--- END DEBUG ---"
+          exit 1
       - name: Install System Dependencies
         run: |
           sudo apt-get update
