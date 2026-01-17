@@ -71,12 +71,11 @@ jobs:
           
           echo "Fetching release info..."
           
-          # 2. Fetch 'latest' release. 
-          # -L follows the 301 redirect (CRITICAL FIX)
-          # -o saves to file so we don't hit API 3 times
+          # 2. Fetch Release JSON (With -L to handle the 301 Redirect automatically)
           HTTP_CODE=$(curl -L -s -o release.json -w "%{http_code}" -H "Authorization: token $GITHUB_TOKEN" "$LATEST_URL")
-          
-          # 3. Fallback: If 'latest' is 404 (common with pre-releases), fetch the newest tag instead
+          echo "Initial HTTP Code: $HTTP_CODE"
+
+          # 3. Fallback logic: If 'latest' is missing (404), try the newest Tag (Pre-release)
           if [ "$HTTP_CODE" == "404" ]; then
             echo "::warning::'Latest' release not found. Switching to newest tag..."
             HTTP_CODE=$(curl -L -s -o release_list.json -w "%{http_code}" -H "Authorization: token $GITHUB_TOKEN" "$TAGS_URL")
@@ -85,22 +84,29 @@ jobs:
             fi
           fi
 
-          # 4. Final Verification
-          if [ "$HTTP_CODE" != "200" ]; then
-            echo "::error::API Request failed with HTTP $HTTP_CODE"
+          # 4. CRITICAL DEBUGGING: Print all file names found in the release
+          if [ "$HTTP_CODE" == "200" ]; then
+            echo "---------------------------------------------------"
+            echo "SUCCESS! Release JSON downloaded. Listing assets found:"
+            jq -r '.assets[].name' release.json
+            echo "---------------------------------------------------"
+          else
+            echo "::error::Failed to download release metadata. HTTP Code: $HTTP_CODE"
             cat release.json || true
             exit 1
           fi
 
-          # 5. Parse the single file (No more 'curl | jq' pipe errors)
+          # 5. Parse URLs (Standard Logic)
           LUCI_APP_URL=$(jq -r '.assets[] | select(.name | test(".*luci-app-passwall_.*\\.ipk$")) | .browser_download_url' release.json | head -n1)
           LUCI_I18N_URL=$(jq -r '.assets[] | select(.name | test(".*luci-i18n-passwall-zh-cn_.*\\.ipk$")) | .browser_download_url' release.json | head -n1)
           PACKAGES_ZIP_URL=$(jq -r '.assets[] | select(.name == "passwall_packages_ipk_x86_64.zip") | .browser_download_url' release.json | head -n1)
 
-          if [ -z "$LUCI_APP_URL" ] || [ "$LUCI_APP_URL" == "null" ]; then echo "::error::Could not find luci-app-passwall IPK URL."; exit 1; fi
-          if [ -z "$LUCI_I18N_URL" ] || [ "$LUCI_I18N_URL" == "null" ]; then echo "::error::Could not find luci-i18n-passwall-zh-cn IPK URL."; exit 1; fi
-          if [ -z "$PACKAGES_ZIP_URL" ] || [ "$PACKAGES_ZIP_URL" == "null" ]; then echo "::error::Could not find passwall_packages_ipk_x86_64.zip URL."; exit 1; fi
-
+          # 6. Check results
+          if [ -z "$LUCI_APP_URL" ] || [ "$LUCI_APP_URL" == "null" ]; then 
+             echo "::error::Could not find luci-app-passwall IPK. Check the asset list above to see if the name changed!"
+             exit 1
+          fi
+          
           echo "LUCI_APP_URL=$LUCI_APP_URL" >> $GITHUB_OUTPUT
           echo "LUCI_I18N_URL=$LUCI_I18N_URL" >> $GITHUB_OUTPUT
           echo "PACKAGES_ZIP_URL=$PACKAGES_ZIP_URL" >> $GITHUB_OUTPUT
