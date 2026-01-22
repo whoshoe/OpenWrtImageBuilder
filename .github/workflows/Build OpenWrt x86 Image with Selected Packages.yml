@@ -121,7 +121,24 @@ jobs:
           wget -qO "${TEMP_IPK_DIR}/luci-app-passwall.ipk" "${{ steps.passwall_release.outputs.LUCI_APP_URL }}"
           wget -qO "${TEMP_IPK_DIR}/luci-i18n-passwall-zh-cn.ipk" "${{ steps.passwall_release.outputs.LUCI_I18N_URL }}"
 
-          # --- 2. Generate Download List (SourceForge) ---
+          # --- 2. Download OpenWRT Xray (yichya) ---
+          echo "Fetching latest Xray release from yichya/openwrt-xray..."
+          XRAY_API_URL="https://api.github.com/repos/yichya/openwrt-xray/releases/latest"
+          
+          # Fetch the latest release JSON and extract the URL for the asset ending in 'x86_64.ipk'
+          # We use grep -oP to handle the JSON parsing without needing jq
+          XRAY_DOWNLOAD_URL=$(curl -s "$XRAY_API_URL" | grep -oP '"browser_download_url": "\K[^"]+x86_64\.ipk')
+      
+          if [ -z "$XRAY_DOWNLOAD_URL" ]; then
+            echo "::error::Could not find an x86_64.ipk asset in the latest release of yichya/openwrt-xray"
+            exit 1
+          fi
+      
+          echo "Found Xray URL: $XRAY_DOWNLOAD_URL"
+          # Download into the temp dir using the original filename
+          wget -q -P "$TEMP_IPK_DIR" "$XRAY_DOWNLOAD_URL"
+
+          # --- 3. Generate Download List (SourceForge) ---
           SF_RSS_URL="https://sourceforge.net/projects/openwrt-passwall-build/rss?path=/releases/packages-24.10/x86_64/passwall_packages"
           
           echo "Fetching file list from RSS..."
@@ -140,7 +157,7 @@ jobs:
              exit 1
           fi
 
-          # --- 3. Granular Download Loop ---
+          # --- 4. Granular Download Loop ---
           # We loop through the text file to log every single URL
           echo "Starting downloads..."
           counter=1
@@ -161,7 +178,7 @@ jobs:
              counter=$((counter+1))
           done < sf_links.txt
 
-          # --- 4. Move ---
+          # --- 5. Move ---
           echo "Moving valid IPKs to package directory..."
           cp "${TEMP_IPK_DIR}/"*.ipk "$PACKAGE_DIR/"          
           
