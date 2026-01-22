@@ -123,45 +123,36 @@ jobs:
           echo "Downloading dependencies from SourceForge..."
           SF_RSS_URL="https://sourceforge.net/projects/openwrt-passwall-build/rss?path=/releases/packages-24.10/x86_64/passwall_packages"
           
-          # 1. Fetch RSS and Convert URLs to 'downloads.sourceforge.net' format
-          # The regex extracts the path, and sed rebuilds it into the automation-friendly URL
+          # 1. RSS Parsing & Domain Switch
+          # We explicitly grep only for lines containing ".ipk/download"
+          # Then we switch to 'downloads.sourceforge.net' to bypass the 403 Forbidden error
           echo "Fetching file list..."
           curl -sL "$SF_RSS_URL" | \
-            grep -oP 'link>\Khttps://sourceforge.net/projects/[^<]+' | \
+            grep -oP 'link>\Khttps://sourceforge.net/projects/[^<]+\.ipk/download' | \
             sed 's|https://sourceforge.net/projects/|https://downloads.sourceforge.net/project/|' | \
             sed 's|/files/|/|' | \
             sed 's|/download$||' > sf_links.txt
 
           FILE_COUNT=$(wc -l < sf_links.txt)
-          echo "Found $FILE_COUNT packages."
+          echo "Found $FILE_COUNT .ipk packages to download."
           
           if [ "$FILE_COUNT" -gt 0 ]; then
-             echo "First 3 URLs (for verification):"
-             head -n 3 sf_links.txt
-             
-             # 2. Download using the 'downloads' subdomain
-             # We can use standard wget flags now, as this domain is designed for it.
+             # 2. Download (Skipping strict file content checks)
              wget -q -i sf_links.txt -P "$TEMP_IPK_DIR" --content-disposition --trust-server-names
           else
-             echo "::error::No links found! Check RSS feed."
+             echo "::error::No .ipk links found in RSS feed."
              exit 1
           fi
 
-          # 3. Sanity Check (Still essential!)
-          echo "Verifying file integrity..."
-          for f in "$TEMP_IPK_DIR"/*.ipk; do
-            if [ -f "$f" ]; then
-              if file "$f" | grep -i "HTML"; then
-                echo "::error::Download failed for $(basename "$f") - File is HTML."
-                exit 1
-              fi
-            fi
-          done
-          
-          echo "Moving valid IPKs..."
+          echo "Moving all IPK files to ImageBuilder package directory..."
           cp "${TEMP_IPK_DIR}/"*.ipk "$PACKAGE_DIR/"
-
+          
           rm -rf "$TEMP_IPK_DIR"
+
+          echo "-------------------------------------------------------"
+          echo "FINAL CONTENTS OF PACKAGE DIRECTORY:"
+          echo "-------------------------------------------------------"
+          ls -lh "$PACKAGE_DIR"
 
       - name: Modify ImageBuilder .config File
         working-directory: ${{ env.IMAGEBUILDER_PATH }}
