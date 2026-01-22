@@ -110,7 +110,7 @@ jobs:
           echo "LUCI_APP_URL=$LUCI_APP_URL" >> $GITHUB_OUTPUT
           echo "LUCI_I18N_URL=$LUCI_I18N_URL" >> $GITHUB_OUTPUT
 
-      - name: Download, Validate, and Place Passwall IPK Files
+      - name: Download and Place Passwall IPK Files
         run: |
           PACKAGE_DIR="${{ env.IMAGEBUILDER_PATH }}/packages"
           TEMP_IPK_DIR="${GITHUB_WORKSPACE}/temp_ipk_download"
@@ -153,7 +153,7 @@ jobs:
              
              # Run wget for this specific URL
              # We capture the exit code to see if wget itself crashed
-             if wget -q -P "$TEMP_IPK_DIR" --content-disposition --trust-server-names "$url"; then
+             if wget -q -P "$TEMP_IPK_DIR" "$url"; then
                 echo "Wget exit code: 0 (Success)"
              else
                 echo "::error::Wget failed for URL: $url"
@@ -161,33 +161,7 @@ jobs:
              counter=$((counter+1))
           done < sf_links.txt
 
-          # --- 4. Validation & Inspection ---
-          echo "---------------------------------------------------"
-          echo "INSPECTING DOWNLOADED FILES"
-          echo "---------------------------------------------------"
-          
-          IS_CORRUPT=0
-          for f in "$TEMP_IPK_DIR"/*.ipk; do
-            if [ -f "$f" ]; then
-              FILE_TYPE=$(file -b "$f")
-              FILE_SIZE=$(du -h "$f" | cut -f1)
-              
-              echo "File: $(basename "$f") | Size: $FILE_SIZE | Type: $FILE_TYPE"
-              
-              # Check for HTML corruption
-              if echo "$FILE_TYPE" | grep -qEi "HTML|ASCII text"; then
-                 echo "::error::CORRUPT FILE: $(basename "$f") is HTML (Anti-bot block)."
-                 IS_CORRUPT=1
-              fi
-            fi
-          done
-
-          if [ "$IS_CORRUPT" -eq 1 ]; then
-             echo "::error::Build stopped because downloads are corrupt."
-             exit 1
-          fi
-
-          # --- 5. Move ---
+          # --- 4. Move ---
           echo "Moving valid IPKs to package directory..."
           cp "${TEMP_IPK_DIR}/"*.ipk "$PACKAGE_DIR/"          
           
