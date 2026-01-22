@@ -122,28 +122,27 @@ jobs:
           wget -qO "${TEMP_IPK_DIR}/luci-i18n-passwall-zh-cn.ipk" "${{ steps.passwall_release.outputs.LUCI_I18N_URL }}"
 
           echo "Downloading other packages from SourceForge..."
-          SF_URL="https://sourceforge.net/projects/openwrt-passwall-build/files/releases/packages-24.10/x86_64/passwall_packages/"
+          # 1. Use the RSS feed URL for the specific directory path
+          SF_RSS_URL="https://sourceforge.net/projects/openwrt-passwall-build/rss?path=/releases/packages-24.10/x86_64/passwall_packages"
           
-          # Scrape SourceForge for .ipk download links
-          echo "Fetching file list from: $SF_URL"
-          SF_HTML=$(curl -sL "$SF_URL")
+          echo "Fetching file list from RSS: $SF_RSS_URL"
           
-          # Extract links ending in .ipk/download (standard SF format) or just .ipk
-          # We use sed to ensure they are absolute URLs
-          echo "$SF_HTML" | grep -oP 'href="\K[^"]+\.ipk/download' | sed 's|^/|https://sourceforge.net/|' > sf_links.txt
-          
-          # Fallback if no /download suffix found
-          if [ ! -s sf_links.txt ]; then
-             echo "$SF_HTML" | grep -oP 'href="\K[^"]+\.ipk' | sed 's|^/|https://sourceforge.net/|' > sf_links.txt
-          fi
+          # 2. Parse the RSS XML to find <link> tags ending in .ipk/download
+          # This works because the RSS feed provides absolute URLs automatically
+          curl -sL "$SF_RSS_URL" | grep -oP '<link>\K[^<]+' | grep '\.ipk/download$' > sf_links.txt
           
           FILE_COUNT=$(wc -l < sf_links.txt)
           echo "Found $FILE_COUNT additional packages on SourceForge."
           
+          # Debug: Print found links to logs to verify
           if [ "$FILE_COUNT" -gt 0 ]; then
-            wget -q -i sf_links.txt -P "$TEMP_IPK_DIR" --content-disposition
+             echo "Links found:"
+             cat sf_links.txt
+             
+             # 3. Download using wget with -i (input file) and --content-disposition (to handle redirects/filenames)
+             wget -q -i sf_links.txt -P "$TEMP_IPK_DIR" --content-disposition
           else
-            echo "::warning::No packages found at SourceForge URL."
+             echo "::warning::No packages found at SourceForge URL. Check the path or RSS feed."
           fi
 
           echo "Moving all IPK files to ImageBuilder package directory..."
