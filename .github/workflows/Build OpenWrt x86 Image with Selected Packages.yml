@@ -96,10 +96,10 @@ jobs:
             exit 1
           fi
 
-          # 5. Parse URLs (Standard Logic)
+          # 5. Parse URLs (Updated to find new naming schema like 23.05-24.10_luci-app-passwall...)
+          # The regex '.*luci-app-passwall_.*\.ipk$' covers the prefix and suffix changes.
           LUCI_APP_URL=$(jq -r '.assets[] | select(.name | test(".*luci-app-passwall_.*\\.ipk$")) | .browser_download_url' release.json | head -n1)
           LUCI_I18N_URL=$(jq -r '.assets[] | select(.name | test(".*luci-i18n-passwall-zh-cn_.*\\.ipk$")) | .browser_download_url' release.json | head -n1)
-          PACKAGES_ZIP_URL=$(jq -r '.assets[] | select(.name == "passwall_packages_ipk_x86_64.zip") | .browser_download_url' release.json | head -n1)
 
           # 6. Check results
           if [ -z "$LUCI_APP_URL" ] || [ "$LUCI_APP_URL" == "null" ]; then 
@@ -109,7 +109,6 @@ jobs:
           
           echo "LUCI_APP_URL=$LUCI_APP_URL" >> $GITHUB_OUTPUT
           echo "LUCI_I18N_URL=$LUCI_I18N_URL" >> $GITHUB_OUTPUT
-          echo "PACKAGES_ZIP_URL=$PACKAGES_ZIP_URL" >> $GITHUB_OUTPUT
 
       - name: Download and Place Passwall IPK Files
         run: |
@@ -118,22 +117,37 @@ jobs:
           TEMP_IPK_DIR="${GITHUB_WORKSPACE}/temp_ipk_download"
           mkdir -p "$TEMP_IPK_DIR"
 
-          echo "Downloading luci-app-passwall..."
+          echo "Downloading main Passwall Apps from GitHub..."
           wget -qO "${TEMP_IPK_DIR}/luci-app-passwall.ipk" "${{ steps.passwall_release.outputs.LUCI_APP_URL }}"
-          echo "Downloading luci-i18n-passwall-zh-cn..."
           wget -qO "${TEMP_IPK_DIR}/luci-i18n-passwall-zh-cn.ipk" "${{ steps.passwall_release.outputs.LUCI_I18N_URL }}"
-          echo "Downloading Passwall packages zip..."
-          wget -qO "${TEMP_IPK_DIR}/passwall_packages.zip" "${{ steps.passwall_release.outputs.PACKAGES_ZIP_URL }}"
 
-          TEMP_UNZIP_DIR="${TEMP_IPK_DIR}/unzipped_packages"
-          mkdir -p "$TEMP_UNZIP_DIR"
-          unzip -o "${TEMP_IPK_DIR}/passwall_packages.zip" -d "$TEMP_UNZIP_DIR"
-
-          cp "${TEMP_IPK_DIR}/luci-app-passwall.ipk" "$PACKAGE_DIR/"
-          cp "${TEMP_IPK_DIR}/luci-i18n-passwall-zh-cn.ipk" "$PACKAGE_DIR/"
+          echo "Downloading other packages from SourceForge..."
+          SF_URL="https://sourceforge.net/projects/openwrt-passwall-build/files/releases/packages-24.10/x86_64/passwall_packages/"
           
-          echo "Copying all .ipk files from Passwall packages zip..."
-          find "$TEMP_UNZIP_DIR" -name "*.ipk" -exec cp -v {} "$PACKAGE_DIR/" \;
+          # Scrape SourceForge for .ipk download links
+          echo "Fetching file list from: $SF_URL"
+          SF_HTML=$(curl -sL "$SF_URL")
+          
+          # Extract links ending in .ipk/download (standard SF format) or just .ipk
+          # We use sed to ensure they are absolute URLs
+          echo "$SF_HTML" | grep -oP 'href="\K[^"]+\.ipk/download' | sed 's|^/|https://sourceforge.net/|' > sf_links.txt
+          
+          # Fallback if no /download suffix found
+          if [ ! -s sf_links.txt ]; then
+             echo "$SF_HTML" | grep -oP 'href="\K[^"]+\.ipk' | sed 's|^/|https://sourceforge.net/|' > sf_links.txt
+          fi
+          
+          FILE_COUNT=$(wc -l < sf_links.txt)
+          echo "Found $FILE_COUNT additional packages on SourceForge."
+          
+          if [ "$FILE_COUNT" -gt 0 ]; then
+            wget -q -i sf_links.txt -P "$TEMP_IPK_DIR" --content-disposition
+          else
+            echo "::warning::No packages found at SourceForge URL."
+          fi
+
+          echo "Moving all IPK files to ImageBuilder package directory..."
+          cp "${TEMP_IPK_DIR}/"*.ipk "$PACKAGE_DIR/"
           
           echo "Contents of $PACKAGE_DIR:"
           ls -l "$PACKAGE_DIR"
@@ -146,12 +160,8 @@ jobs:
             fi
           done
           
-          zip_ipk_count=$(find "$PACKAGE_DIR" -name "*.ipk" ! -name "luci-app-passwall.ipk" ! -name "luci-i18n-passwall-zh-cn.ipk" -type f | wc -l)
-          if [ "$zip_ipk_count" -eq 0 ]; then
-             echo "::warning::No additional IPKs seem to have been copied from the Passwall packages zip to $PACKAGE_DIR (or only the two direct downloads were present)."
-          else
-             echo "Copied $zip_ipk_count additional IPKs from the Passwall packages zip."
-          fi
+          total_ipk_count=$(find "$PACKAGE_DIR" -name "*.ipk" | wc -l)
+          echo "Total IPKs ready for build: $total_ipk_count"
           
           rm -rf "$TEMP_IPK_DIR"
 
