@@ -113,54 +113,61 @@ jobs:
       - name: Download and Place Passwall IPK Files
         run: |
           PACKAGE_DIR="${{ env.IMAGEBUILDER_PATH }}/packages"
-          mkdir -p "$PACKAGE_DIR"
           TEMP_IPK_DIR="${GITHUB_WORKSPACE}/temp_ipk_download"
-          mkdir -p "$TEMP_IPK_DIR"
+          mkdir -p "$PACKAGE_DIR" "$TEMP_IPK_DIR"
 
           echo "Downloading main Passwall Apps from GitHub..."
           wget -qO "${TEMP_IPK_DIR}/luci-app-passwall.ipk" "${{ steps.passwall_release.outputs.LUCI_APP_URL }}"
           wget -qO "${TEMP_IPK_DIR}/luci-i18n-passwall-zh-cn.ipk" "${{ steps.passwall_release.outputs.LUCI_I18N_URL }}"
 
-          echo "Downloading other packages from SourceForge..."
-          # 1. Use the RSS feed URL for the specific directory path
+          echo "Downloading dependencies from SourceForge..."
           SF_RSS_URL="https://sourceforge.net/projects/openwrt-passwall-build/rss?path=/releases/packages-24.10/x86_64/passwall_packages"
           
-          echo "Fetching file list from RSS: $SF_RSS_URL"
-          
-          # 2. Parse the RSS XML to find <link> tags ending in .ipk/download
-          # This works because the RSS feed provides absolute URLs automatically
-          curl -sL "$SF_RSS_URL" | grep -oP '<link>\K[^<]+' | grep '\.ipk/download$' > sf_links.txt
-          
+          # 1. Fetch RSS and Convert URLs to 'downloads.sourceforge.net' format
+          # The regex extracts the path, and sed rebuilds it into the automation-friendly URL
+          echo "Fetching file list..."
+          curl -sL "$SF_RSS_URL" | \
+            grep -oP 'link>\Khttps://sourceforge.net/projects/[^<]+' | \
+            sed 's|https://sourceforge.net/projects/|https://downloads.sourceforge.net/project/|' | \
+            sed 's|/files/|/|' | \
+            sed 's|/download$||' > sf_links.txt
+
           FILE_COUNT=$(wc -l < sf_links.txt)
-          echo "Found $FILE_COUNT additional packages on SourceForge."
+          echo "Found $FILE_COUNT packages."
           
-          # Debug: Print found links to logs to verify
           if [ "$FILE_COUNT" -gt 0 ]; then
-             echo "Links found:"
-             cat sf_links.txt
+             echo "First 3 URLs (for verification):"
+             head -n 3 sf_links.txt
              
-             # 3. Download using wget with -i (input file) and --content-disposition (to handle redirects/filenames)
-             wget -q -i sf_links.txt -P "$TEMP_IPK_DIR" --content-disposition
+             # 2. Download using the 'downloads' subdomain
+             # We can use standard wget flags now, as this domain is designed for it.
+             wget -q -i sf_links.txt -P "$TEMP_IPK_DIR" --content-disposition --trust-server-names
           else
-             echo "::warning::No packages found at SourceForge URL. Check the path or RSS feed."
+             echo "::error::No links found! Check RSS feed."
+             exit 1
           fi
 
-          echo "Moving all IPK files to ImageBuilder package directory..."
-          cp "${TEMP_IPK_DIR}/"*.ipk "$PACKAGE_DIR/"
-          
-          echo "Contents of $PACKAGE_DIR:"
-          ls -l "$PACKAGE_DIR"
-
-          DIRECT_DOWNLOAD_IPKS=("luci-app-passwall.ipk" "luci-i18n-passwall-zh-cn.ipk")
-          for ipk_file in "${DIRECT_DOWNLOAD_IPKS[@]}"; do
-            if [ ! -f "$PACKAGE_DIR/$ipk_file" ]; then
-              echo "::error::Directly downloaded IPK '$ipk_file' not found in $PACKAGE_DIR."
-              exit 1
+          # 3. Sanity Check (Still essential!)
+          echo "Verifying file integrity..."
+          for f in "$TEMP_IPK_DIR"/*.ipk; do
+            if [ -f "$f" ]; then
+              if file "$f" | grep -i "HTML"; then
+                echo "::error::Download failed for $(basename "$f") - File is HTML."
+                exit 1
+              fi
             fi
           done
+
+          echo "Moving valid IPKs..."
+          cp "${TEMP_IPK_DIR}/"*.ipk "$PACKAGE_DIR/"
           
-          total_ipk_count=$(find "$PACKAGE_DIR" -name "*.ipk" | wc -l)
-          echo "Total IPKs ready for build: $total_ipk_count"
+          # 4. Generate Index
+          if [ -x "${{ env.IMAGEBUILDER_PATH }}/scripts/ipkg-make-index.sh" ]; then
+             cd "$PACKAGE_DIR"
+             "${{ env.IMAGEBUILDER_PATH }}/scripts/ipkg-make-index.sh" . > Packages
+             gzip -k Packages
+             cd -
+          fi
           
           rm -rf "$TEMP_IPK_DIR"
 
