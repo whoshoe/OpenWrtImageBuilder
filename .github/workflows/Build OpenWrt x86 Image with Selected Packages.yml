@@ -66,8 +66,8 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           # 1. Define URLs
-          LATEST_URL="https://api.github.com/repos/xiaorouji/openwrt-passwall/releases/latest"
-          TAGS_URL="https://api.github.com/repos/xiaorouji/openwrt-passwall/releases?per_page=1"
+          LATEST_URL="https://api.github.com/repos/Openwrt-Passwall/openwrt-passwall/releases/latest"
+          TAGS_URL="https://api.github.com/repos/Openwrt-Passwall/openwrt-passwall/releases?per_page=1"
           
           echo "Fetching release info..."
           
