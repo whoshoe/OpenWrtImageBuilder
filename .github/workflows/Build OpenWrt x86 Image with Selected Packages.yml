@@ -110,23 +110,22 @@ jobs:
           echo "LUCI_APP_URL=$LUCI_APP_URL" >> $GITHUB_OUTPUT
           echo "LUCI_I18N_URL=$LUCI_I18N_URL" >> $GITHUB_OUTPUT
 
-      - name: Download and Place Passwall IPK Files
+      - name: Download, Validate, and Place Passwall IPK Files
         run: |
           PACKAGE_DIR="${{ env.IMAGEBUILDER_PATH }}/packages"
           TEMP_IPK_DIR="${GITHUB_WORKSPACE}/temp_ipk_download"
           mkdir -p "$PACKAGE_DIR" "$TEMP_IPK_DIR"
 
+          # --- 1. Download Main Apps (GitHub) ---
           echo "Downloading main Passwall Apps from GitHub..."
           wget -qO "${TEMP_IPK_DIR}/luci-app-passwall.ipk" "${{ steps.passwall_release.outputs.LUCI_APP_URL }}"
           wget -qO "${TEMP_IPK_DIR}/luci-i18n-passwall-zh-cn.ipk" "${{ steps.passwall_release.outputs.LUCI_I18N_URL }}"
 
-          echo "Downloading dependencies from SourceForge..."
+          # --- 2. Generate Download List (SourceForge) ---
           SF_RSS_URL="https://sourceforge.net/projects/openwrt-passwall-build/rss?path=/releases/packages-24.10/x86_64/passwall_packages"
           
-          # 1. RSS Parsing & Domain Switch
-          # We explicitly grep only for lines containing ".ipk/download"
-          # Then we switch to 'downloads.sourceforge.net' to bypass the 403 Forbidden error
-          echo "Fetching file list..."
+          echo "Fetching file list from RSS..."
+          # Extract links, filter for .ipk, and convert to 'downloads.sourceforge.net'
           curl -sL "$SF_RSS_URL" | \
             grep -oP 'link>\Khttps://sourceforge.net/projects/[^<]+\.ipk/download' | \
             sed 's|https://sourceforge.net/projects/|https://downloads.sourceforge.net/project/|' | \
@@ -136,19 +135,64 @@ jobs:
           FILE_COUNT=$(wc -l < sf_links.txt)
           echo "Found $FILE_COUNT .ipk packages to download."
           
-          if [ "$FILE_COUNT" -gt 0 ]; then
-             # 2. Download (Skipping strict file content checks)
-             wget -q -i sf_links.txt -P "$TEMP_IPK_DIR" --content-disposition --trust-server-names
-          else
-             echo "::error::No .ipk links found in RSS feed."
+          if [ "$FILE_COUNT" -eq 0 ]; then
+             echo "::error::No packages found in RSS feed."
              exit 1
           fi
 
-          echo "Moving all IPK files to ImageBuilder package directory..."
-          cp "${TEMP_IPK_DIR}/"*.ipk "$PACKAGE_DIR/"
+          # --- 3. Granular Download Loop ---
+          # We loop through the text file to log every single URL
+          echo "Starting downloads..."
+          counter=1
+          while IFS= read -r url; do
+             # Skip empty lines
+             if [ -z "$url" ]; then continue; fi
+             
+             echo "---------------------------------------------------"
+             echo "[$counter/$FILE_COUNT] Downloading URL: $url"
+             
+             # Run wget for this specific URL
+             # We capture the exit code to see if wget itself crashed
+             if wget -q -P "$TEMP_IPK_DIR" --content-disposition --trust-server-names "$url"; then
+                echo "Wget exit code: 0 (Success)"
+             else
+                echo "::error::Wget failed for URL: $url"
+             fi
+             counter=$((counter+1))
+          done < sf_links.txt
+
+          # --- 4. Validation & Inspection ---
+          echo "---------------------------------------------------"
+          echo "INSPECTING DOWNLOADED FILES"
+          echo "---------------------------------------------------"
+          
+          IS_CORRUPT=0
+          for f in "$TEMP_IPK_DIR"/*.ipk; do
+            if [ -f "$f" ]; then
+              FILE_TYPE=$(file -b "$f")
+              FILE_SIZE=$(du -h "$f" | cut -f1)
+              
+              echo "File: $(basename "$f") | Size: $FILE_SIZE | Type: $FILE_TYPE"
+              
+              # Check for HTML corruption
+              if echo "$FILE_TYPE" | grep -qEi "HTML|ASCII text"; then
+                 echo "::error::CORRUPT FILE: $(basename "$f") is HTML (Anti-bot block)."
+                 IS_CORRUPT=1
+              fi
+            fi
+          done
+
+          if [ "$IS_CORRUPT" -eq 1 ]; then
+             echo "::error::Build stopped because downloads are corrupt."
+             exit 1
+          fi
+
+          # --- 5. Move ---
+          echo "Moving valid IPKs to package directory..."
+          cp "${TEMP_IPK_DIR}/"*.ipk "$PACKAGE_DIR/"          
           
           rm -rf "$TEMP_IPK_DIR"
-
+          
           echo "-------------------------------------------------------"
           echo "FINAL CONTENTS OF PACKAGE DIRECTORY:"
           echo "-------------------------------------------------------"
