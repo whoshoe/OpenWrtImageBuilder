@@ -157,18 +157,10 @@ jobs:
               fi
             fi
           done
-
+          
           echo "Moving valid IPKs..."
           cp "${TEMP_IPK_DIR}/"*.ipk "$PACKAGE_DIR/"
-          
-          # 4. Generate Index
-          if [ -x "${{ env.IMAGEBUILDER_PATH }}/scripts/ipkg-make-index.sh" ]; then
-             cd "$PACKAGE_DIR"
-             "${{ env.IMAGEBUILDER_PATH }}/scripts/ipkg-make-index.sh" . > Packages
-             gzip -k Packages
-             cd -
-          fi
-          
+
           rm -rf "$TEMP_IPK_DIR"
 
       - name: Modify ImageBuilder .config File
