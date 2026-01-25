@@ -12,7 +12,7 @@ jobs:
       - name: Checkout Repository
         uses: actions/checkout@v4
         with:
-          token: ${{ secrets.PAT_TOKEN }} # IMPORTANT: Use PAT to ensure the push triggers the next workflow
+          token: ${{ secrets.ACTIONS_PAT }} # IMPORTANT: Use PAT to ensure the push triggers the next workflow
           fetch-depth: 0 # Fetch all history so we can check existing tags
 
       - name: Check Latest Passwall Version
