@@ -1,0 +1,58 @@
+name: Check Passwall Update
+
+on:
+  schedule:
+    - cron: '0 0 * * *' # Runs daily at 00:00 UTC
+  workflow_dispatch: # Allows manual triggering for testing
+
+jobs:
+  check_and_tag:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write # Required to push tags
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # Required to see existing tags
+
+      - name: Check Latest Passwall Version
+        id: check
+        run: |
+          # 1. Fetch the latest release tag from upstream
+          UPSTREAM_URL="https://api.github.com/repos/Openwrt-Passwall/openwrt-passwall/releases/latest"
+          LATEST_TAG=$(curl -s "$UPSTREAM_URL" | jq -r '.tag_name')
+          
+          if [ -z "$LATEST_TAG" ] || [ "$LATEST_TAG" == "null" ]; then
+            echo "::error::Failed to fetch latest Passwall version."
+            exit 1
+          fi
+
+          echo "Latest Upstream Version: $LATEST_TAG"
+
+          # 2. Format the tag for this repo (prefixing to avoid collision with date-based release tags)
+          # Example: passwall-4.78-1
+          NEW_TAG="passwall-${LATEST_TAG}"
+
+          # 3. Check if this tag already exists locally
+          if git rev-parse "$NEW_TAG" >/dev/null 2>&1; then
+            echo "Tag $NEW_TAG already exists. No update needed."
+            echo "UPDATE_NEEDED=false" >> $GITHUB_OUTPUT
+          else
+            echo "Tag $NEW_TAG does not exist. Update detected."
+            echo "UPDATE_NEEDED=true" >> $GITHUB_OUTPUT
+            echo "NEW_TAG=$NEW_TAG" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Create and Push Tag
+        if: steps.check.outputs.UPDATE_NEEDED == 'true'
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          NEW_TAG: ${{ steps.check.outputs.NEW_TAG }}
+        run: |
+          git config user.name "GitHub Actions"
+          git config user.email "actions@github.com"
+          
+          echo "Creating tag $NEW_TAG"
+          git tag "$NEW_TAG"
+          git push origin "$NEW_TAG"
