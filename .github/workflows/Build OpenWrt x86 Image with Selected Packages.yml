@@ -135,8 +135,16 @@ jobs:
           fi
       
           echo "Found Xray URL: $XRAY_DOWNLOAD_URL"
-          # Download into the temp dir using the original filename
-          wget -q -P "$TEMP_IPK_DIR" "$XRAY_DOWNLOAD_URL"
+          # 1. Get the original filename from the URL
+          ORIG_NAME=$(basename "$XRAY_DOWNLOAD_URL")
+          
+          # 2. Replace 'openwrt-xray' with 'xray-core' in the filename
+          NEW_NAME="${ORIG_NAME/openwrt-xray/xray-core}"
+          
+          echo "Downloading as: $NEW_NAME"
+
+          # 3. Download to the temp dir with the NEW filename using -O
+          wget -q -O "$TEMP_IPK_DIR/$NEW_NAME" "$XRAY_DOWNLOAD_URL"
 
           # --- 3. Generate Download List (SourceForge) ---
           SF_RSS_URL="https://sourceforge.net/projects/openwrt-passwall-build/rss?path=/releases/packages-24.10/x86_64/passwall_packages"
