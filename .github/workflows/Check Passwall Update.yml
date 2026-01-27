@@ -19,7 +19,7 @@ jobs:
         id: check
         run: |
           # 1. Fetch the latest release tag from upstream (Openwrt-Passwall)
-          UPSTREAM_URL="https://api.github.com/repos/Openwrt-Passwall/openwrt-passwall/releases/latest"
+          UPSTREAM_URL="https://api.github.com/repos/whoshoe/openwrt-passwall/releases/latest"
           
           # Fetch JSON and extract tag_name. 
           # We use -L to follow redirects and -s for silent mode.
