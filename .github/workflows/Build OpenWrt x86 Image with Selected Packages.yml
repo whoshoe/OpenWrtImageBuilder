@@ -119,71 +119,56 @@ jobs:
           TEMP_IPK_DIR="${GITHUB_WORKSPACE}/temp_ipk_download"
           mkdir -p "$PACKAGE_DIR" "$TEMP_IPK_DIR"
 
-          # --- 1. Download Main Apps (GitHub) ---
-          echo "Downloading main Passwall Apps from GitHub..."
-          wget -qO "${TEMP_IPK_DIR}/luci-app-passwall.ipk" "${{ steps.passwall_release.outputs.LUCI_APP_URL }}"
-          wget -qO "${TEMP_IPK_DIR}/luci-i18n-passwall-zh-cn.ipk" "${{ steps.passwall_release.outputs.LUCI_I18N_URL }}"
+          # --- 1. Download Passwall Apps & Dependencies (whoshoe/openwrt-passwall) ---
+          echo "Fetching latest Passwall release from whoshoe/openwrt-passwall..."
+          PW_API_URL="https://api.github.com/repos/whoshoe/openwrt-passwall/releases/latest"
+          
+          # Fetch Release JSON
+          PW_RELEASE_JSON=$(curl -s "$PW_API_URL")
 
-          # --- 2. Download OpenWRT Xray ---
-          echo "Fetching latest Xray release from whoeshoe/OpenwrtXrayPackage..."
+          # Parse URLs for: Main App, i18n, and the Dependencies Zip
+          # Note: We look for patterns matching the sample names provided
+          PW_APP_URL=$(echo "$PW_RELEASE_JSON" | grep -oP '"browser_download_url": "\K[^"]+luci-app-passwall_[^"]+\.ipk' | head -n 1)
+          PW_I18N_URL=$(echo "$PW_RELEASE_JSON" | grep -oP '"browser_download_url": "\K[^"]+luci-i18n-passwall-zh-cn_[^"]+\.ipk' | head -n 1)
+          PW_DEPS_ZIP_URL=$(echo "$PW_RELEASE_JSON" | grep -oP '"browser_download_url": "\K[^"]+passwall_packages_ipk_x86_64\.zip')
+
+          echo "Found Passwall App: $PW_APP_URL"
+          echo "Found i18n App: $PW_I18N_URL"
+          echo "Found Deps Zip: $PW_DEPS_ZIP_URL"
+
+          # Validate and Download
+          if [ -z "$PW_APP_URL" ] || [ -z "$PW_DEPS_ZIP_URL" ]; then
+             echo "::error::Failed to find required Passwall assets in the latest release."
+             exit 1
+          fi
+
+          wget -q -P "$TEMP_IPK_DIR" "$PW_APP_URL"
+          wget -q -P "$TEMP_IPK_DIR" "$PW_I18N_URL"
+          
+          # Download and Unzip Dependencies
+          wget -q -O "${TEMP_IPK_DIR}/deps.zip" "$PW_DEPS_ZIP_URL"
+          echo "Unzipping dependencies..."
+          unzip -q -o "${TEMP_IPK_DIR}/deps.zip" -d "$TEMP_IPK_DIR"
+          rm "${TEMP_IPK_DIR}/deps.zip"
+
+          # --- 2. Download OpenWRT Xray (whoshoe/OpenwrtXrayPackage) ---
+          echo "Fetching latest Xray release from whoshoe/OpenwrtXrayPackage..."
           XRAY_API_URL="https://api.github.com/repos/whoshoe/OpenwrtXrayPackage/releases/latest"
           
-          # Fetch the latest release JSON and extract the URL for the asset ending in 'x86_64.ipk'
-          # We use grep -oP to handle the JSON parsing without needing jq
           XRAY_DOWNLOAD_URL=$(curl -s "$XRAY_API_URL" | grep -oP '"browser_download_url": "\K[^"]+x86_64\.ipk')
-      
+       
           if [ -z "$XRAY_DOWNLOAD_URL" ]; then
             echo "::error::Could not find an x86_64.ipk asset in the latest release of whoeshoe/OpenwrtXrayPackage"
             exit 1
           fi
-      
+       
           echo "Found Xray URL: $XRAY_DOWNLOAD_URL"
-          # Download into the temp dir using the original filename
           wget -q -P "$TEMP_IPK_DIR" "$XRAY_DOWNLOAD_URL"
 
-          # --- 3. Generate Download List (SourceForge) ---
-          SF_RSS_URL="https://sourceforge.net/projects/openwrt-passwall-build/rss?path=/releases/packages-24.10/x86_64/passwall_packages"
-          
-          echo "Fetching file list from RSS..."
-          # Extract links, filter for .ipk, and convert to 'downloads.sourceforge.net'
-          curl -sL "$SF_RSS_URL" | \
-            grep -oP 'link>\Khttps://sourceforge.net/projects/[^<]+\.ipk/download' | \
-            sed 's|https://sourceforge.net/projects/|https://downloads.sourceforge.net/project/|' | \
-            sed 's|/files/|/|' | \
-            sed 's|/download$||' > sf_links.txt
-
-          FILE_COUNT=$(wc -l < sf_links.txt)
-          echo "Found $FILE_COUNT .ipk packages to download."
-          
-          if [ "$FILE_COUNT" -eq 0 ]; then
-             echo "::error::No packages found in RSS feed."
-             exit 1
-          fi
-
-          # --- 4. Granular Download Loop ---
-          # We loop through the text file to log every single URL
-          echo "Starting downloads..."
-          counter=1
-          while IFS= read -r url; do
-             # Skip empty lines
-             if [ -z "$url" ]; then continue; fi
-             
-             echo "---------------------------------------------------"
-             echo "[$counter/$FILE_COUNT] Downloading URL: $url"
-             
-             # Run wget for this specific URL
-             # We capture the exit code to see if wget itself crashed
-             if wget -q -P "$TEMP_IPK_DIR" "$url"; then
-                echo "Wget exit code: 0 (Success)"
-             else
-                echo "::error::Wget failed for URL: $url"
-             fi
-             counter=$((counter+1))
-          done < sf_links.txt
-
-          # --- 5. Move ---
-          echo "Moving valid IPKs to package directory..."
-          cp "${TEMP_IPK_DIR}/"*.ipk "$PACKAGE_DIR/"          
+          # --- 3. Move to Package Directory ---
+          echo "Moving all IPKs to package directory..."
+          # Use find to handle cases where unzip creates subfolders
+          find "$TEMP_IPK_DIR" -name "*.ipk" -exec mv {} "$PACKAGE_DIR/" \;
           
           rm -rf "$TEMP_IPK_DIR"
           
