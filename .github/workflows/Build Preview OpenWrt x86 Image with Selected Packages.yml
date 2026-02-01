@@ -297,7 +297,7 @@ jobs:
       - name: Create Release Tag
         id: create_tag
         run: |
-          RELEASE_TAG="$(date +'%Y.%m.%d.%H%M%S')"
+          RELEASE_TAG="$(date +'%Y.%m.%d.%H%M%S')-pre"
           echo "RELEASE_TAG=${RELEASE_TAG}" >> $GITHUB_OUTPUT
           echo "Generated release tag: ${RELEASE_TAG}"
 
@@ -310,7 +310,7 @@ jobs:
           name: ${{ steps.create_tag.outputs.RELEASE_TAG }}
           body: ${{ steps.generate_release_notes.outputs.release_body }}
           draft: false
-          prerelease: false
+          prerelease: true
           files: |
             ${{ steps.build_image.outputs.BUILD_OUTPUT_PATH }}/*
 
