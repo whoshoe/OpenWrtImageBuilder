@@ -112,8 +112,8 @@ jobs:
           PW_RELEASE_JSON=$(curl -s "$PW_API_URL")
 
           # Parse URLs for: Main App, i18n, and the Dependencies Zip
-          PW_APP_URL=$(echo "$PW_RELEASE_JSON" | grep -oP '"browser_download_url": "\K[^"]+luci-app-passwall_[^"]+\.apk' | head -n 1)
-          PW_I18N_URL=$(echo "$PW_RELEASE_JSON" | grep -oP '"browser_download_url": "\K[^"]+luci-i18n-passwall-zh-cn_[^"]+\.apk' | head -n 1)
+          PW_APP_URL=$(echo "$PW_RELEASE_JSON" | grep -oP '"browser_download_url": "\K[^"]+luci-app-passwall[-_][^"]+\.apk' | head -n 1)
+          PW_I18N_URL=$(echo "$PW_RELEASE_JSON" | grep -oP '"browser_download_url": "\K[^"]+luci-i18n-passwall-zh-cn[-_][^"]+\.apk' | head -n 1)
           PW_DEPS_ZIP_URL=$(echo "$PW_RELEASE_JSON" | grep -oP '"browser_download_url": "\K[^"]+passwall_packages_apk_x86_64\.zip')
 
           echo "Found Passwall App: $PW_APP_URL"
