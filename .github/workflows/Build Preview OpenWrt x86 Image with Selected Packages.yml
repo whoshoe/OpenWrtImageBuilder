@@ -86,8 +86,8 @@ jobs:
           fi
 
           # 5. Parse URLs
-          LUCI_APP_URL=$(jq -r '.assets[] | select(.name | test(".*luci-app-passwall_.*\\.apk$")) | .browser_download_url' release.json | head -n1)
-          LUCI_I18N_URL=$(jq -r '.assets[] | select(.name | test(".*luci-i18n-passwall-zh-cn_.*\\.apk$")) | .browser_download_url' release.json | head -n1)
+          LUCI_APP_URL=$(jq -r '.assets[] | select(.name | test(".*luci-app-passwall[-_].*\\.apk$")) | .browser_download_url' release.json | head -n1)
+          LUCI_I18N_URL=$(jq -r '.assets[] | select(.name | test(".*luci-i18n-passwall-zh-cn[-_].*\\.apk$")) | .browser_download_url' release.json | head -n1)
 
           # 6. Check results
           if [ -z "$LUCI_APP_URL" ] || [ "$LUCI_APP_URL" == "null" ]; then 
