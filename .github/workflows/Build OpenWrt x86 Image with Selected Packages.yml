@@ -1,9 +1,9 @@
 name: Build OpenWrt x86 Image with Selected Packages
 
 on:
-  push:
-    tags:
-      - 'passwall-*' # Triggers the pipeline when the check workflow pushes a new tag
+  # push:
+    # tags:
+      # - 'passwall-*' # Triggers the pipeline when the check workflow pushes a new tag
   workflow_dispatch: # Allows manual triggering from the Actions tab
 
 jobs:
