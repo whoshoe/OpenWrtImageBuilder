@@ -1,7 +1,10 @@
-name: Build Preview OpenWrt x86 Image with Selected Packages
+name: (APK) Build OpenWrt x86 Image with Selected Packages
 
 on:
-  workflow_dispatch: # Allows manual triggering from the Actions tab
+  push:
+    tags:
+      - 'passwall-*'
+  workflow_dispatch:
 
 jobs:
   build_openwrt_image:
@@ -23,27 +26,13 @@ jobs:
       - name: Get Latest OpenWrt ImageBuilder SDK URL
         id: openwrt_sdk
         run: |
-          LATEST_STABLE_VERSION=$(curl -s https://downloads.openwrt.org/releases/ | grep -oP 'href="\K[0-9]+\.[0-9]+\.[0-9]+(?=/")' | sort -V | tail -n1)
-          echo "Latest OpenWrt stable version: $LATEST_STABLE_VERSION"
+          # 1. Set specific requested version: 25.12.0-rc4
+          SDK_URL="https://downloads.openwrt.org/releases/25.12.0-rc4/targets/x86/64/openwrt-imagebuilder-25.12.0-rc4-x86-64.Linux-x86_64.tar.zst"
+          LATEST_STABLE_VERSION="25.12.0-rc4"
+          
+          echo "Using SDK URL: $SDK_URL"
+          echo "SDK_URL=$SDK_URL" >> $GITHUB_OUTPUT
           echo "LATEST_STABLE_VERSION=$LATEST_STABLE_VERSION" >> $GITHUB_OUTPUT
-          
-          SDK_URL_PRIMARY="https://downloads.openwrt.org/releases/${LATEST_STABLE_VERSION}/targets/x86/64/openwrt-imagebuilder-${LATEST_STABLE_VERSION}-x86-64.Linux-x86_64.tar.zst"
-          
-          if curl --output /dev/null --silent --head --fail "$SDK_URL_PRIMARY"; then
-            echo "SDK_URL=$SDK_URL_PRIMARY" >> $GITHUB_OUTPUT
-            echo "Using SDK URL: $SDK_URL_PRIMARY"
-          else
-            echo "Primary SDK URL ($SDK_URL_PRIMARY) not found. Attempting to find SDK file in directory listing..."
-            SDK_DIR_URL="https://downloads.openwrt.org/releases/${LATEST_STABLE_VERSION}/targets/x86/64/"
-            SDK_FILENAME=$(curl -s "$SDK_DIR_URL" | grep -oP 'openwrt-imagebuilder-'"${LATEST_STABLE_VERSION}"'-x86-64\.Linux-x86_64\.tar\.zst' | head -n1)
-            if [ -z "$SDK_FILENAME" ]; then
-              echo "::error::Could not find ImageBuilder SDK (tar.zst) for version ${LATEST_STABLE_VERSION} on x86/64 target."
-              exit 1
-            fi
-            SDK_URL_FALLBACK="${SDK_DIR_URL}${SDK_FILENAME}"
-            echo "SDK_URL=$SDK_URL_FALLBACK" >> $GITHUB_OUTPUT
-            echo "Found SDK URL: $SDK_URL_FALLBACK"
-          fi
 
       - name: Download and Extract OpenWrt ImageBuilder
         run: |
@@ -60,78 +49,103 @@ jobs:
           echo "IMAGEBUILDER_PATH=${IMAGEBUILDER_FULL_PATH}" >> $GITHUB_ENV
           echo "ImageBuilder extracted to ${IMAGEBUILDER_FULL_PATH}"
 
-      - name: Get Latest Passwall Pre-Release Information
+      - name: Get Latest Passwall Release Information
         id: passwall_release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          # 1. Change the repo to 'whoshoe' and the endpoint to '/releases' (lists all)
-          RELEASE_LIST_URL="https://api.github.com/repos/whoshoe/openwrt-passwall/releases"
-          echo "Fetching latest Passwall pre-release info from $RELEASE_LIST_URL"
+          # 1. Define URLs
+          LATEST_URL="https://api.github.com/repos/Openwrt-Passwall/openwrt-passwall/releases/latest"
+          TAGS_URL="https://api.github.com/repos/Openwrt-Passwall/openwrt-passwall/releases?per_page=1"
           
-          # 2. Fetch the list and get the JSON for the *first* (latest) release using jq '.[0]'
-          LATEST_RELEASE_JSON=$(curl -s $RELEASE_LIST_URL | jq '.[0]')
+          echo "Fetching release info..."
+          
+          # 2. Fetch Release JSON (With -L to handle the 301 Redirect automatically)
+          HTTP_CODE=$(curl -L -s -o release.json -w "%{http_code}" -H "Authorization: token $GITHUB_TOKEN" "$LATEST_URL")
+          echo "Initial HTTP Code: $HTTP_CODE"
 
-          # 3. Check if we actually got a release
-          if [ -z "$LATEST_RELEASE_JSON" ] || [ "$LATEST_RELEASE_JSON" == "null" ]; then
-            echo "::error::Could not find any releases (including pre-releases) from $RELEASE_LIST_URL."
+          # 3. Fallback logic: If 'latest' is missing (404), try the newest Tag (Pre-release)
+          if [ "$HTTP_CODE" == "404" ]; then
+            echo "::warning::'Latest' release not found. Switching to newest tag..."
+            HTTP_CODE=$(curl -L -s -o release_list.json -w "%{http_code}" -H "Authorization: token $GITHUB_TOKEN" "$TAGS_URL")
+            if [ "$HTTP_CODE" == "200" ]; then
+              jq '.[0]' release_list.json > release.json
+            fi
+          fi
+
+          # 4. CRITICAL DEBUGGING: Print all file names found in the release
+          if [ "$HTTP_CODE" == "200" ]; then
+            echo "---------------------------------------------------"
+            echo "SUCCESS! Release JSON downloaded. Listing assets found:"
+            jq -r '.assets[].name' release.json
+            echo "---------------------------------------------------"
+          else
+            echo "::error::Failed to download release metadata. HTTP Code: $HTTP_CODE"
+            cat release.json || true
             exit 1
           fi
-          
-          # 4. Parse the JSON for the specific assets from the single curl call
-          LUCI_APP_URL=$(echo "$LATEST_RELEASE_JSON" | jq -r '.assets[] | select(.name | test(".*luci-app-passwall_.*\\.ipk$")) | .browser_download_url' | head -n1)
-          LUCI_I18N_URL=$(echo "$LATEST_RELEASE_JSON" | jq -r '.assets[] | select(.name | test(".*luci-i18n-passwall-zh-cn_.*\\.ipk$")) | .browser_download_url' | head -n1)
-          PACKAGES_ZIP_URL=$(echo "$LATEST_RELEASE_JSON" | jq -r '.assets[] | select(.name == "passwall_packages_ipk_x86_64.zip") | .browser_download_url' | head -n1)
 
-          if [ -z "$LUCI_APP_URL" ] || [ "$LUCI_APP_URL" == "null" ]; then echo "::error::Could not find luci-app-passwall IPK URL."; exit 1; fi
-          if [ -z "$LUCI_I18N_URL" ] || [ "$LUCI_I18N_URL" == "null" ]; then echo "::error::Could not find luci-i18n-passwall-zh-cn IPK URL."; exit 1; fi
-          if [ -z "$PACKAGES_ZIP_URL" ] || [ "$PACKAGES_ZIP_URL" == "null" ]; then echo "::error::Could not find passwall_packages_ipk_x86_64.zip URL."; exit 1; fi
+          # 5. Parse URLs
+          LUCI_APP_URL=$(jq -r '.assets[] | select(.name | test(".*luci-app-passwall_.*\\.apk$")) | .browser_download_url' release.json | head -n1)
+          LUCI_I18N_URL=$(jq -r '.assets[] | select(.name | test(".*luci-i18n-passwall-zh-cn_.*\\.apk$")) | .browser_download_url' release.json | head -n1)
 
-          echo "LUCI_APP_URL=$LUCI_APP_URL" >> $GITHUB_OUTPUT
-          echo "LUCI_I18N_URL=$LUCI_I18N_URL" >> $GITHUB_OUTPUT
-          echo "PACKAGES_ZIP_URL=$PACKAGES_ZIP_URL" >> $GITHUB_OUTPUT
-
-      - name: Download and Place Passwall IPK Files
-        run: |
-          PACKAGE_DIR="${{ env.IMAGEBUILDER_PATH }}/packages"
-          mkdir -p "$PACKAGE_DIR"
-          TEMP_IPK_DIR="${GITHUB_WORKSPACE}/temp_ipk_download"
-          mkdir -p "$TEMP_IPK_DIR"
-
-          echo "Downloading luci-app-passwall..."
-          wget -qO "${TEMP_IPK_DIR}/luci-app-passwall.ipk" "${{ steps.passwall_release.outputs.LUCI_APP_URL }}"
-          echo "Downloading luci-i18n-passwall-zh-cn..."
-          wget -qO "${TEMP_IPK_DIR}/luci-i18n-passwall-zh-cn.ipk" "${{ steps.passwall_release.outputs.LUCI_I18N_URL }}"
-          echo "Downloading Passwall packages zip..."
-          wget -qO "${TEMP_IPK_DIR}/passwall_packages.zip" "${{ steps.passwall_release.outputs.PACKAGES_ZIP_URL }}"
-
-          TEMP_UNZIP_DIR="${TEMP_IPK_DIR}/unzipped_packages"
-          mkdir -p "$TEMP_UNZIP_DIR"
-          unzip -o "${TEMP_IPK_DIR}/passwall_packages.zip" -d "$TEMP_UNZIP_DIR"
-
-          cp "${TEMP_IPK_DIR}/luci-app-passwall.ipk" "$PACKAGE_DIR/"
-          cp "${TEMP_IPK_DIR}/luci-i18n-passwall-zh-cn.ipk" "$PACKAGE_DIR/"
-          
-          echo "Copying all .ipk files from Passwall packages zip..."
-          find "$TEMP_UNZIP_DIR" -name "*.ipk" -exec cp -v {} "$PACKAGE_DIR/" \;
-          
-          echo "Contents of $PACKAGE_DIR:"
-          ls -l "$PACKAGE_DIR"
-
-          DIRECT_DOWNLOAD_IPKS=("luci-app-passwall.ipk" "luci-i18n-passwall-zh-cn.ipk")
-          for ipk_file in "${DIRECT_DOWNLOAD_IPKS[@]}"; do
-            if [ ! -f "$PACKAGE_DIR/$ipk_file" ]; then
-              echo "::error::Directly downloaded IPK '$ipk_file' not found in $PACKAGE_DIR."
-              exit 1
-            fi
-          done
-          
-          zip_ipk_count=$(find "$PACKAGE_DIR" -name "*.ipk" ! -name "luci-app-passwall.ipk" ! -name "luci-i18n-passwall-zh-cn.ipk" -type f | wc -l)
-          if [ "$zip_ipk_count" -eq 0 ]; then
-             echo "::warning::No additional IPKs seem to have been copied from the Passwall packages zip to $PACKAGE_DIR (or only the two direct downloads were present)."
-          else
-             echo "Copied $zip_ipk_count additional IPKs from the Passwall packages zip."
+          # 6. Check results
+          if [ -z "$LUCI_APP_URL" ] || [ "$LUCI_APP_URL" == "null" ]; then 
+             echo "::error::Could not find luci-app-passwall APK. Check the asset list above to see if the name changed!"
+             exit 1
           fi
           
-          rm -rf "$TEMP_IPK_DIR"
+          echo "LUCI_APP_URL=$LUCI_APP_URL" >> $GITHUB_OUTPUT
+          echo "LUCI_I18N_URL=$LUCI_I18N_URL" >> $GITHUB_OUTPUT
+
+      - name: Download and Place Passwall APK Files
+        run: |
+          PACKAGE_DIR="${{ env.IMAGEBUILDER_PATH }}/packages"
+          TEMP_APK_DIR="${GITHUB_WORKSPACE}/temp_apk_download"
+          mkdir -p "$PACKAGE_DIR" "$TEMP_APK_DIR"
+
+          # --- 1. Download Passwall Apps & Dependencies (whoshoe/openwrt-passwall) ---
+          echo "Fetching latest Passwall release from whoshoe/openwrt-passwall..."
+          PW_API_URL="https://api.github.com/repos/whoshoe/openwrt-passwall/releases/latest"
+          
+          # Fetch Release JSON
+          PW_RELEASE_JSON=$(curl -s "$PW_API_URL")
+
+          # Parse URLs for: Main App, i18n, and the Dependencies Zip
+          PW_APP_URL=$(echo "$PW_RELEASE_JSON" | grep -oP '"browser_download_url": "\K[^"]+luci-app-passwall_[^"]+\.apk' | head -n 1)
+          PW_I18N_URL=$(echo "$PW_RELEASE_JSON" | grep -oP '"browser_download_url": "\K[^"]+luci-i18n-passwall-zh-cn_[^"]+\.apk' | head -n 1)
+          PW_DEPS_ZIP_URL=$(echo "$PW_RELEASE_JSON" | grep -oP '"browser_download_url": "\K[^"]+passwall_packages_apk_x86_64\.zip')
+
+          echo "Found Passwall App: $PW_APP_URL"
+          echo "Found i18n App: $PW_I18N_URL"
+          echo "Found Deps Zip: $PW_DEPS_ZIP_URL"
+
+          # Validate and Download
+          if [ -z "$PW_APP_URL" ] || [ -z "$PW_DEPS_ZIP_URL" ]; then
+             echo "::error::Failed to find required Passwall assets in the latest release."
+             exit 1
+          fi
+
+          wget -q -P "$TEMP_APK_DIR" "$PW_APP_URL"
+          wget -q -P "$TEMP_APK_DIR" "$PW_I18N_URL"
+          
+          # Download and Unzip Dependencies
+          wget -q -O "${TEMP_APK_DIR}/deps.zip" "$PW_DEPS_ZIP_URL"
+          echo "Unzipping dependencies..."
+          unzip -q -o "${TEMP_APK_DIR}/deps.zip" -d "$TEMP_APK_DIR"
+          rm "${TEMP_APK_DIR}/deps.zip"
+          
+          # --- 3. Move to Package Directory ---
+          echo "Moving all APKs to package directory..."
+          # Use find to handle cases where unzip creates subfolders; search for *.apk
+          find "$TEMP_APK_DIR" -name "*.apk" -exec mv {} "$PACKAGE_DIR/" \;
+          
+          rm -rf "$TEMP_APK_DIR"
+          
+          echo "-------------------------------------------------------"
+          echo "FINAL CONTENTS OF PACKAGE DIRECTORY:"
+          echo "-------------------------------------------------------"
+          ls -lh "$PACKAGE_DIR"
 
       - name: Modify ImageBuilder .config File
         working-directory: ${{ env.IMAGEBUILDER_PATH }}
@@ -159,7 +173,7 @@ jobs:
           echo "Starting image build..."
           make image \
             PROFILE="generic" \
-            PACKAGES="dnsmasq-full chinadns-ng dns2socks microsocks tcping xray-core xray-plugin geoview luci-app-passwall luci-i18n-passwall-zh-cn kmod-nft-nat kmod-nft-socket kmod-nft-tproxy htop keepalived luci luci-ssl luci-compat luci-i18n-base-zh-cn qemu-ga inotifywait luci-app-keepalived unzip -dnsmasq" \
+            PACKAGES="dnsmasq-full chinadns-ng dns2socks microsocks tcping xray-core xray-plugin geoview luci-app-passwall luci-i18n-passwall-zh-cn kmod-nft-nat kmod-nft-socket kmod-nft-tproxy kmod-macvlan htop keepalived luci luci-ssl luci-compat luci-i18n-base-zh-cn qemu-ga inotifywait luci-app-keepalived unzip -dnsmasq" \
             KERNEL_PARTSIZE=32 \
             ROOTFS_PARTSIZE=256
 
@@ -203,7 +217,7 @@ jobs:
               RAW_PACKAGE_LIST=$(cat "$MANIFEST_FILE" || echo "ERROR_CAT_MANIFEST_FAILED")
 
               if [[ "$RAW_PACKAGE_LIST" != "ERROR_CAT_MANIFEST_FAILED" ]] && [[ -n "$RAW_PACKAGE_LIST" ]]; then
-                PACKAGES_FOUND_COUNT=0 # Renamed from PACKAGES_PROCESSED_FOR_TABLE for clarity
+                PACKAGES_FOUND_COUNT=0
                 for PKG_NAME in "${SPECIFIED_PACKAGES[@]}"; do
                   PKG_INFO_LINE_RAW=$(echo "$RAW_PACKAGE_LIST" | grep -E "^${PKG_NAME} - " | head -n 1 || true)
                   if [ -n "$PKG_INFO_LINE_RAW" ]; then
@@ -218,7 +232,7 @@ jobs:
                 done
                 
                 if [ "${#TABLE_ROWS_ARRAY[@]}" -eq 0 ]; then 
-                    if [ ${#SPECIFIED_PACKAGES[@]} -gt 0 ]; then # If packages were specified but none made it to the array
+                    if [ ${#SPECIFIED_PACKAGES[@]} -gt 0 ]; then
                         MANIFEST_STATUS_MESSAGE="None of the specified packages were found or processed from the manifest."
                     else
                         MANIFEST_STATUS_MESSAGE="N/A (No packages were specified to filter for)."
@@ -241,7 +255,7 @@ jobs:
           if [ "${#TABLE_ROWS_ARRAY[@]}" -gt 0 ]; then
             FINAL_PACKAGE_TABLE_STRING+="| Package Name | Version |"$'\n' # Header with actual newline
             FINAL_PACKAGE_TABLE_STRING+="|---|---"$'\n' # Separator line with actual newline
-            JOINED_TABLE_ROWS=$(IFS=$'\n'; echo "${TABLE_ROWS_ARRAY[*]}") # Joins elements with \n; echo adds a final \n if not empty
+            JOINED_TABLE_ROWS=$(IFS=$'\n'; echo "${TABLE_ROWS_ARRAY[*]}") # Joins elements with \n
             FINAL_PACKAGE_TABLE_STRING+="$JOINED_TABLE_ROWS" 
           else # Use status message if array is empty
             FINAL_PACKAGE_TABLE_STRING="$MANIFEST_STATUS_MESSAGE"
@@ -259,11 +273,10 @@ jobs:
 
           RELEASE_BODY+="**Specified Packages included in this build (from manifest):**"$'\n'
           RELEASE_BODY+="$FINAL_PACKAGE_TABLE_STRING" 
-          # Add a newline after the table/status message if it doesn't already end with one (it should if it's a table)
           if [[ "$FINAL_PACKAGE_TABLE_STRING" != *$'\n' ]] && [ -n "$FINAL_PACKAGE_TABLE_STRING" ]; then 
             RELEASE_BODY+=$'\n'
           fi
-          RELEASE_BODY+=$'\n' # Extra blank line for spacing
+          RELEASE_BODY+=$'\n'
 
           echo "DEBUG: Constructed RELEASE_BODY (first 500 chars):"
           printf "%.500s\n" "$RELEASE_BODY"
@@ -276,7 +289,6 @@ jobs:
           echo >> "$GITHUB_OUTPUT" 
           echo "${DELIMITER}" >> "$GITHUB_OUTPUT"
 
-          # Check the exit status of the block that wrote to GITHUB_OUTPUT
           if [ $? -ne 0 ]; then 
             echo "::error::Potentially failed to write RELEASE_BODY to GITHUB_OUTPUT."
           fi
@@ -295,10 +307,10 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           tag_name: ${{ steps.create_tag.outputs.RELEASE_TAG }}
-          name: Preview-${{ steps.create_tag.outputs.RELEASE_TAG }}
+          name: ${{ steps.create_tag.outputs.RELEASE_TAG }}
           body: ${{ steps.generate_release_notes.outputs.release_body }}
           draft: false
-          prerelease: true
+          prerelease: false
           files: |
             ${{ steps.build_image.outputs.BUILD_OUTPUT_PATH }}/*
 
@@ -320,7 +332,7 @@ jobs:
               core.info(`Fetching releases for ${owner}/${repo}...`);
               const { data: allReleases } = await github.rest.repos.listReleases({ owner, repo, per_page: 100 });
               
-              const workflowReleases = allReleases.filter(r => r.name && r.name.startsWith("Preview-"));
+              const workflowReleases = allReleases.filter(r => r.name);
               core.info(`Found ${workflowReleases.length} releases matching workflow pattern out of ${allReleases.length} total releases.`);
 
               const sortedReleases = workflowReleases.sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
