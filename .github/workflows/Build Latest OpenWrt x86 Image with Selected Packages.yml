@@ -324,7 +324,7 @@ jobs:
           name: ${{ steps.create_tag.outputs.RELEASE_TAG }}
           body: ${{ steps.generate_release_notes.outputs.release_body }}
           draft: false
-          prerelease: true
+          prerelease: false
           files: |
             ${{ steps.build_image.outputs.BUILD_OUTPUT_PATH }}/*
 
