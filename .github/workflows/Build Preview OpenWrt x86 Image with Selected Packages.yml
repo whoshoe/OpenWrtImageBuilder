@@ -26,13 +26,27 @@ jobs:
       - name: Get Latest OpenWrt ImageBuilder SDK URL
         id: openwrt_sdk
         run: |
-          # 1. Set specific requested version: 25.12.0-rc5
-          SDK_URL="https://downloads.openwrt.org/releases/25.12.0-rc5/targets/x86/64/openwrt-imagebuilder-25.12.0-rc5-x86-64.Linux-x86_64.tar.zst"
-          LATEST_STABLE_VERSION="25.12.0-rc5"
-          
-          echo "Using SDK URL: $SDK_URL"
-          echo "SDK_URL=$SDK_URL" >> $GITHUB_OUTPUT
+          LATEST_STABLE_VERSION=$(curl -s https://downloads.openwrt.org/releases/ | grep -oP 'href="\K[0-9]+\.[0-9]+\.[0-9]+(?=/")' | sort -V | tail -n1)
+          echo "Latest OpenWrt stable version: $LATEST_STABLE_VERSION"
           echo "LATEST_STABLE_VERSION=$LATEST_STABLE_VERSION" >> $GITHUB_OUTPUT
+          
+          SDK_URL_PRIMARY="https://downloads.openwrt.org/releases/${LATEST_STABLE_VERSION}/targets/x86/64/openwrt-imagebuilder-${LATEST_STABLE_VERSION}-x86-64.Linux-x86_64.tar.zst"
+          
+          if curl --output /dev/null --silent --head --fail "$SDK_URL_PRIMARY"; then
+            echo "SDK_URL=$SDK_URL_PRIMARY" >> $GITHUB_OUTPUT
+            echo "Using SDK URL: $SDK_URL_PRIMARY"
+          else
+            echo "Primary SDK URL ($SDK_URL_PRIMARY) not found. Attempting to find SDK file in directory listing..."
+            SDK_DIR_URL="https://downloads.openwrt.org/releases/${LATEST_STABLE_VERSION}/targets/x86/64/"
+            SDK_FILENAME=$(curl -s "$SDK_DIR_URL" | grep -oP 'openwrt-imagebuilder-'"${LATEST_STABLE_VERSION}"'-x86-64\.Linux-x86_64\.tar\.zst' | head -n1)
+            if [ -z "$SDK_FILENAME" ]; then
+              echo "::error::Could not find ImageBuilder SDK (tar.zst) for version ${LATEST_STABLE_VERSION} on x86/64 target."
+              exit 1
+            fi
+            SDK_URL_FALLBACK="${SDK_DIR_URL}${SDK_FILENAME}"
+            echo "SDK_URL=$SDK_URL_FALLBACK" >> $GITHUB_OUTPUT
+            echo "Found SDK URL: $SDK_URL_FALLBACK"
+          fi
 
       - name: Download and Extract OpenWrt ImageBuilder
         run: |
