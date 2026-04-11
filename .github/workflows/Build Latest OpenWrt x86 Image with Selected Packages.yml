@@ -1,4 +1,4 @@
-name: (APK) Build OpenWrt x86 Image with Selected Packages
+name: (APK) Build OpenWrt Image with Selected Packages
 
 on:
   push:
@@ -9,6 +9,22 @@ on:
 jobs:
   build_openwrt_image:
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: x86/64
+            subtarget: x86-64
+            profile: generic
+            arch: x86_64
+            display_name: x86_64
+            packages: "dnsmasq-full chinadns-ng dns2socks microsocks tcping xray-core geoview luci-app-passwall luci-i18n-passwall-zh-cn kmod-nft-nat kmod-nft-socket kmod-nft-tproxy kmod-macvlan htop keepalived luci luci-ssl luci-compat luci-i18n-base-zh-cn qemu-ga inotifywait luci-app-keepalived unzip -dnsmasq"
+          - target: rockchip/armv8
+            subtarget: rockchip-armv8
+            profile: friendlyarm_nanopi-r4s
+            arch: aarch64_generic
+            display_name: NanoPi-R4S
+            packages: "dnsmasq-full chinadns-ng dns2socks microsocks tcping xray-core geoview luci-app-passwall luci-i18n-passwall-zh-cn kmod-nft-nat kmod-nft-socket kmod-nft-tproxy kmod-macvlan htop keepalived luci luci-ssl luci-compat luci-i18n-base-zh-cn inotifywait luci-app-keepalived unzip -dnsmasq"
     outputs:
       release_tag: ${{ steps.create_tag.outputs.RELEASE_TAG }} 
     steps:
@@ -30,17 +46,20 @@ jobs:
           echo "Latest OpenWrt stable version: $LATEST_STABLE_VERSION"
           echo "LATEST_STABLE_VERSION=$LATEST_STABLE_VERSION" >> $GITHUB_OUTPUT
           
-          SDK_URL_PRIMARY="https://downloads.openwrt.org/releases/${LATEST_STABLE_VERSION}/targets/x86/64/openwrt-imagebuilder-${LATEST_STABLE_VERSION}-x86-64.Linux-x86_64.tar.zst"
+          TARGET="${{ matrix.target }}"
+          SUBTARGET="${{ matrix.subtarget }}"
+          
+          SDK_URL_PRIMARY="https://downloads.openwrt.org/releases/${LATEST_STABLE_VERSION}/targets/${TARGET}/openwrt-imagebuilder-${LATEST_STABLE_VERSION}-${SUBTARGET}.Linux-x86_64.tar.zst"
           
           if curl --output /dev/null --silent --head --fail "$SDK_URL_PRIMARY"; then
             echo "SDK_URL=$SDK_URL_PRIMARY" >> $GITHUB_OUTPUT
             echo "Using SDK URL: $SDK_URL_PRIMARY"
           else
             echo "Primary SDK URL ($SDK_URL_PRIMARY) not found. Attempting to find SDK file in directory listing..."
-            SDK_DIR_URL="https://downloads.openwrt.org/releases/${LATEST_STABLE_VERSION}/targets/x86/64/"
-            SDK_FILENAME=$(curl -s "$SDK_DIR_URL" | grep -oP 'openwrt-imagebuilder-'"${LATEST_STABLE_VERSION}"'-x86-64\.Linux-x86_64\.tar\.zst' | head -n1)
+            SDK_DIR_URL="https://downloads.openwrt.org/releases/${LATEST_STABLE_VERSION}/targets/${TARGET}/"
+            SDK_FILENAME=$(curl -s "$SDK_DIR_URL" | grep -oP 'openwrt-imagebuilder-'"${LATEST_STABLE_VERSION}"'-'"${SUBTARGET}"'\.Linux-x86_64\.tar\.zst' | head -n1)
             if [ -z "$SDK_FILENAME" ]; then
-              echo "::error::Could not find ImageBuilder SDK (tar.zst) for version ${LATEST_STABLE_VERSION} on x86/64 target."
+              echo "::error::Could not find ImageBuilder SDK (tar.zst) for version ${LATEST_STABLE_VERSION} on ${TARGET} target."
               exit 1
             fi
             SDK_URL_FALLBACK="${SDK_DIR_URL}${SDK_FILENAME}"
@@ -99,9 +118,9 @@ jobs:
             exit 1
           fi
 
-          # 5. Parse URLs
-          LUCI_APP_URL=$(jq -r '.assets[] | select(.name | test(".*luci-app-passwall[-_].*\\.apk$")) | .browser_download_url' release.json | head -n1)
-          LUCI_I18N_URL=$(jq -r '.assets[] | select(.name | test(".*luci-i18n-passwall-zh-cn[-_].*\\.apk$")) | .browser_download_url' release.json | head -n1)
+          # 5. Parse URLs (match only non-prefixed filenames starting with "luci-")
+          LUCI_APP_URL=$(jq -r '.assets[] | select(.name | test("^luci-app-passwall[-_].*\\.apk$")) | .browser_download_url' release.json | head -n1)
+          LUCI_I18N_URL=$(jq -r '.assets[] | select(.name | test("^luci-i18n-passwall-zh-cn[-_].*\\.apk$")) | .browser_download_url' release.json | head -n1)
 
           # 6. Check results
           if [ -z "$LUCI_APP_URL" ] || [ "$LUCI_APP_URL" == "null" ]; then 
@@ -126,9 +145,11 @@ jobs:
           PW_RELEASE_JSON=$(curl -s "$PW_API_URL")
 
           # Parse URLs for: Main App, i18n, and the Dependencies Zip
-          PW_APP_URL=$(echo "$PW_RELEASE_JSON" | grep -oP '"browser_download_url": "\K[^"]+luci-app-passwall[-_][^"]+\.apk' | head -n 1)
-          PW_I18N_URL=$(echo "$PW_RELEASE_JSON" | grep -oP '"browser_download_url": "\K[^"]+luci-i18n-passwall-zh-cn[-_][^"]+\.apk' | head -n 1)
-          PW_DEPS_ZIP_URL=$(echo "$PW_RELEASE_JSON" | grep -oP '"browser_download_url": "\K[^"]+passwall_packages_apk_x86_64\.zip')
+          # Use /luci- to anchor on the filename boundary, ensuring we pick the
+          # non-prefixed APK (e.g. "luci-app-passwall-..." not "25.12+_luci-app-passwall-...")
+          PW_APP_URL=$(echo "$PW_RELEASE_JSON" | grep -oP '"browser_download_url": "\K[^"]+/luci-app-passwall[-_][^"]+\.apk' | head -n 1)
+          PW_I18N_URL=$(echo "$PW_RELEASE_JSON" | grep -oP '"browser_download_url": "\K[^"]+/luci-i18n-passwall-zh-cn[-_][^"]+\.apk' | head -n 1)
+          PW_DEPS_ZIP_URL=$(echo "$PW_RELEASE_JSON" | grep -oP '"browser_download_url": "\K[^"]+passwall_packages_apk_${{ matrix.arch }}\.zip')
 
           echo "Found Passwall App: $PW_APP_URL"
           echo "Found i18n App: $PW_I18N_URL"
@@ -184,15 +205,15 @@ jobs:
         id: build_image
         working-directory: ${{ env.IMAGEBUILDER_PATH }}
         run: |
-          echo "Starting image build..."
+          echo "Starting image build for ${{ matrix.display_name }} (${{ matrix.profile }})..."
           make image \
-            PROFILE="generic" \
-            PACKAGES="dnsmasq-full chinadns-ng dns2socks microsocks tcping xray-core geoview luci-app-passwall luci-i18n-passwall-zh-cn kmod-nft-nat kmod-nft-socket kmod-nft-tproxy kmod-macvlan htop keepalived luci luci-ssl luci-compat luci-i18n-base-zh-cn qemu-ga inotifywait luci-app-keepalived unzip -dnsmasq" \
+            PROFILE="${{ matrix.profile }}" \
+            PACKAGES="${{ matrix.packages }}" \
             KERNEL_PARTSIZE=32 \
             ROOTFS_PARTSIZE=256
 
-          echo "BUILD_OUTPUT_PATH=${{ env.IMAGEBUILDER_PATH }}/bin/targets/x86/64" >> $GITHUB_OUTPUT
-          echo "Image build complete. Output files are in ${{ env.IMAGEBUILDER_PATH }}/bin/targets/x86/64/"
+          echo "BUILD_OUTPUT_PATH=${{ env.IMAGEBUILDER_PATH }}/bin/targets/${{ matrix.target }}" >> $GITHUB_OUTPUT
+          echo "Image build complete. Output files are in ${{ env.IMAGEBUILDER_PATH }}/bin/targets/${{ matrix.target }}/"
           ls -R "${{ env.IMAGEBUILDER_PATH }}/bin/"
 
       - name: Generate Release Notes
@@ -211,13 +232,14 @@ jobs:
           echo "DEBUG: Build Output Dir: '$BUILD_OUTPUT_DIR'"
 
           # --- 2. Define Specified Packages ---
-          SPECIFIED_PACKAGES=(
-            "dnsmasq-full" "chinadns-ng" "dns2socks" "microsocks" "tcping"
-            "xray-core" "geoview" "luci-app-passwall" "luci-i18n-passwall-zh-cn"
-            "kmod-nft-nat" "kmod-nft-socket" "kmod-nft-tproxy" "htop" "keepalived"
-            "luci" "luci-ssl" "luci-compat" "luci-i18n-base-zh-cn" "qemu-ga" "inotifywait"
-            "luci-app-keepalived" "unzip"
-          )
+          # Build SPECIFIED_PACKAGES array dynamically from matrix packages
+          MATRIX_PACKAGES="${{ matrix.packages }}"
+          SPECIFIED_PACKAGES=()
+          for pkg in $MATRIX_PACKAGES; do
+            # Skip removal entries (packages starting with -)
+            [[ "$pkg" == -* ]] && continue
+            SPECIFIED_PACKAGES+=("$pkg")
+          done
           echo "DEBUG: Specified packages to list: ${SPECIFIED_PACKAGES[*]}"
 
           # --- 3. Read Manifest and Prepare Package Table Rows ---
@@ -280,7 +302,7 @@ jobs:
           # --- 5. Construct Release Body Incrementally ---
           RELEASE_BODY=""
           RELEASE_BODY+="OpenWrt image built on $BUILD_DATE_STRING."$'\n'
-          RELEASE_BODY+="Profile: generic (x86/64)"$'\n'
+          RELEASE_BODY+="Profile: ${{ matrix.profile }} (${{ matrix.display_name }})"$'\n'
           RELEASE_BODY+="ImageBuilder Version: SDK for OpenWrt $OPENWRT_SDK_VERSION"$'\n'
           RELEASE_BODY+="Kernel Partition Size: 32MB"$'\n'
           RELEASE_BODY+="RootFS Partition Size: 256MB"$'\n'$'\n' 
@@ -311,7 +333,7 @@ jobs:
       - name: Create Release Tag
         id: create_tag
         run: |
-          RELEASE_TAG="$(date +'%Y.%m.%d.%H%M%S')"
+          RELEASE_TAG="$(date +'%Y.%m.%d.%H%M%S')-${{ matrix.display_name }}"
           echo "RELEASE_TAG=${RELEASE_TAG}" >> $GITHUB_OUTPUT
           echo "Generated release tag: ${RELEASE_TAG}"
 
@@ -321,7 +343,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           tag_name: ${{ steps.create_tag.outputs.RELEASE_TAG }}
-          name: ${{ steps.create_tag.outputs.RELEASE_TAG }}
+          name: "OpenWrt ${{ matrix.display_name }} - ${{ steps.create_tag.outputs.RELEASE_TAG }}"
           body: ${{ steps.generate_release_notes.outputs.release_body }}
           draft: false
           prerelease: false
